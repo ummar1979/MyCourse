@@ -1,0 +1,196 @@
+---
+title: "STT371 FINAL PROJECT (Model 1)"
+author: "Ummar A. Sallil"
+date: "2022-12-12"
+output:
+  word_document: default
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+``````
+# Helper Packages
+```{r}
+library(ggplot2)
+library(lattice)
+library(caret)
+library(readr)
+library(rsample)
+library(modeldata)
+library(dplyr) 
+library(tidyverse)
+library(ROCR)
+library(pROC)
+library(xgboost)
+library(recipes)
+```
+# Loading dataset
+```{r}
+radiomics<- read.csv("radiomics.csv")
+```
+
+```{r}
+head(radiomics)
+```
+
+```{r}
+summary(radiomics)
+```
+
+## Processing the dataset
+#Check for null and missing values
+```{r}
+sum(is.na(radiomics))
+```
+# Checking for normality of the dataset using shapiro-test
+```{r}
+library(dplyr)
+X1 <- radiomics %>% 
+  select_if(is.numeric)
+```
+#If the p-value of the test is greater than α = .05, then the data is assumed to be normally distributed.
+
+```{r}
+X2 <- apply(X1,2,shapiro.test)
+```
+# since all variable were tested, we need to determine which variables are skewed. 
+```{r}
+normaldata <- unlist(lapply(X2, function(x) x$p.value))
+sum(normaldata>0,05)
+skew <- names(normaldata[normaldata>0.05])
+skew
+```
+#the result shows that an "Entropy_cooc.W.ADC" is skewed or not normally distributed.
+# normalizing the skewed data
+```{r}
+Nor <- log(radiomics$Entropy_cooc.W.ADC)
+shapiro.test(Nor)
+```
+# Get the correlation of the whole dataset expect the categorical variables
+```{r}
+library(dplyr)
+newdf1 = select(radiomics, -c("Institution","Failure.binary", "Failure"))
+cor.newdf1 = cor(newdf1)
+corr = round(cor.newdf1,2) 
+head(corr)
+```
+# Data preparation and splitting using only the normal dataset
+```{r}
+set.seed(123)  # for reproducibility
+df <- radiomics %>% mutate_if(is.ordered, factor, ordered = FALSE)
+df <- radiomics %>%
+  mutate_if(str_detect(names(.), 'Qual|Cond|QC|Qu'), as.numeric)
+
+```
+#Split the data intro training (80%) and testing (20%) stratified in Failure.binary column
+
+```{r}
+split = initial_split(df,prop = 0.8 ,strata = "Failure.binary")
+churn_train <- training(split)
+churn_test  <- testing(split)
+
+```
+# pre-processing for X and Y using xgboost
+```{r}
+xgb_train <- recipe(Failure.binary~ ., data = df) %>%
+  step_integer(all_nominal()) %>%
+  step_nzv(all_nominal()) %>%
+  step_integer(contains("Dissimilarity")) %>%
+  step_integer(Failure) %>%
+  step_integer(Entropy_cooc.W.ADC) %>%
+  step_dummy(all_nominal(), -all_outcomes(), one_hot = TRUE) %>%
+  step_center(all_numeric(), -all_outcomes()) %>%
+  step_scale(all_numeric(), -all_outcomes()) %>%
+  prep(training = churn_train, retain = TRUE) %>%
+  juice()
+```
+```{r}
+X <- as.matrix(xgb_train[setdiff(names(xgb_train), "Failure.binary")])
+Y <- xgb_train$Failure.binary
+```
+# setting optimal parameter list of the dataset
+```{r}
+params <- list(
+  eta = 0.01,
+  max_depth = 3,
+  min_child_weight = 3,
+  subsample = 0.5,
+  colsample_bytree = 0.5
+)
+```
+
+```{r}
+xgb.fit.final <- xgboost(
+  params = params,
+  data = X,
+  label = Y,
+  nrounds = 999,
+  objective = "binary:logistic",
+  verbose = 0
+)
+```
+```{r}
+summary(xgb.fit.final)
+```
+#Print the Top 20 important features during Training
+
+```{r}
+vip::vip(xgb.fit.final, num_features = 20)
+```
+# Prediction performance of the model using training dataset
+```{r}
+pred1<- predict(xgb.fit.final, X, type = "prob")
+pred1
+perf1 <- prediction(pred1, churn_train$Failure.binary) %>%
+  performance(measure = "tpr", x.measure = "fpr")
+
+```
+```{r}
+par(mfrow = c(1,2))
+```
+# Training model prediction performance
+```{r}
+roc(churn_train$Failure.binary ~ pred1, 
+    plot=TRUE, legacy.axes=FALSE, 
+    percent=TRUE, 
+    col="red", 
+    lwd=2, 
+    print.auc=TRUE, 
+    main = "Performance in Training")
+```
+###__________________________________#####__________________________________####
+
+#Print the AUC values during Testing
+```{r}
+xgb_test <- recipe(Failure.binary~ ., data = churn_test) %>%
+  step_integer(all_nominal()) %>%
+  step_nzv(all_nominal()) %>%
+  step_integer(contains("Dissimilarity")) %>%
+  step_integer(Failure) %>%
+  step_integer(Entropy_cooc.W.ADC) %>%
+  step_dummy(all_nominal(), -all_outcomes(), one_hot = TRUE) %>%
+  step_center(all_numeric(), -all_outcomes()) %>%
+  step_scale(all_numeric(), -all_outcomes()) %>%
+  prep(training = churn_test, retain = TRUE) %>%
+  juice()
+```
+
+```{r}
+X1 <- as.matrix(xgb_test[setdiff(names(xgb_test), "Failure.binary")])
+```
+```{r}
+pred_test<- predict(xgb.fit.final, X1, type = "prob")
+pred_test
+perf2 <- prediction(pred_test, churn_test$Failure.binary) %>%
+  performance(measure = "tpr", x.measure = "fpr")
+```
+# Testing set prediction performance
+```{r}
+roc(churn_test$Failure.binary ~ pred_test, plot=TRUE, legacy.axes=FALSE, 
+    percent=TRUE, col="red", lwd=2, print.auc=TRUE, main = "Performance in testing")
+
+```
+
+#################### END #############

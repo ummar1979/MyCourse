@@ -1,0 +1,88 @@
+---
+title: "FINAL PROJECT (KMEANS)"
+author: "Ummar A. Sallil"
+date: "2022-12-13"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+# Helper packages
+```{r}
+library(dplyr)      
+library(ggplot2)     
+library(stringr)     
+library(gridExtra)   
+```
+# Modeling packages
+```{r}
+library(tidyverse)  
+library(cluster)     
+library(factoextra)  
+```
+# loading dataset
+```{r}
+radiomics <- read.csv("radiomics.csv")
+attach(radiomics)
+```
+```{r}
+X1 <- radiomics %>% 
+  select_if(is.numeric)
+```
+#we start by scaling/standardizing the data
+
+```{r}
+df <- scale(X1)
+head(df)
+```
+# Identifying cluster with different centers
+```{r}
+cluster0 <- kmeans(df, centers = 2, nstart = 25)
+cluster1 <- kmeans(df, centers = 3, nstart = 25)
+str(cluster1)
+cluster2 <- kmeans(df, centers = 4, nstart = 25)
+str(cluster2)
+cluster3 <- kmeans(df, centers = 5, nstart = 25)
+str(cluster3)
+```
+#plotting the clustered results above
+```{r}
+fviz_cluster(cluster0, data = df)
+fviz_cluster(cluster1, data = df)
+fviz_cluster(cluster2, data = df)
+fviz_cluster(cluster3, data = df)
+```
+# based on the 3 results, cluster0 seems to be a good clustering since no overlapping of the entries.  
+
+# Creating a plot of the number of cluster using nbclust with method within sum of squares and clusGap.
+```{r}
+fviz_nbclust(df, kmeans, method = "wss")
+```
+
+```{r}
+gap_stat <- clusGap(df,
+                    FUN = kmeans,
+                    nstart = 25,
+                    K.max = 10,
+                    B = 25)
+fviz_gap_stat(gap_stat)
+```
+# The results of the two approaches above confirm that the optimum cluster is equal to 2.
+
+# dataset reproducible
+```{r}
+set.seed(143)
+```
+
+# adding clust0 to the original dataset to have the final data. 
+```{r}
+final_data <- cbind(radiomics, cluster = cluster0$cluster)
+head(final_data)
+```
+
+
+
+
